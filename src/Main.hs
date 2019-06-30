@@ -6,10 +6,11 @@ import           Data.Char
 import           Data.Validation
 import qualified Data.Text                     as T
 import qualified Data.Text.IO                  as T
+import           Control.Monad
 
 newtype Password = Password T.Text deriving (Show, Eq)
 
-newtype Error = Error T.Text deriving (Show, Eq)
+newtype Error = Error [T.Text] deriving (Show, Eq)
 
 newtype Username = Username T.Text deriving (Show, Eq)
 
@@ -18,13 +19,17 @@ instance Semigroup Error where
 
 checkLength :: Int -> Int -> T.Text -> Validation Error T.Text
 checkLength min max x = case (pwLen > max || pwLen < min) of
-  True -> Failure $ Error $ T.unlines
-    [ "It is <longer than "
-    , T.pack $ show max
-    , " or shorter than "
-    , T.pack $ show min
-    , " characters"
-    ]
+  True ->
+    Failure
+      $ Error
+      $ [ T.concat
+            [ "It is longer than "
+            , T.pack $ show max
+            , " or shorter than "
+            , T.pack $ show min
+            , " characters"
+            ]
+        ]
   False -> Success x
   where pwLen = T.length x
 
@@ -37,12 +42,12 @@ checkUsernameLength = fmap Username . checkLength 3 12
 
 requireAlphaNum :: T.Text -> Validation Error T.Text
 requireAlphaNum xs = case (all isAlphaNum $ T.unpack xs) of
-  False -> Failure
-    $ Error "Your password has to be consisted of numeric or alpha character"
+  False -> Failure $ Error
+    ["Your password has to be consisted of numeric or alpha character"]
   True -> Success xs
 
 cleanWhitespace :: T.Text -> Validation Error T.Text
-cleanWhitespace "" = Failure $ Error "Empty String is not allowed"
+cleanWhitespace "" = Failure $ Error ["Empty String is not allowed"]
 cleanWhitespace x  = Success $ T.strip x
 
 validatePassword :: Password -> Validation Error Password
@@ -56,6 +61,16 @@ validateUsername (Username username) =
   cleanWhitespace username
     *> requireAlphaNum username
     *> checkUsernameLength username
+
+passwordErrors :: Password -> Validation Error Password
+passwordErrors password = case validatePassword password of
+  Failure err       -> Failure (Error ["Invalid password:"] <> err)
+  Success password2 -> Success password2
+
+usernameErrors :: Username -> Validation Error Username
+usernameErrors username = case validateUsername username of
+  Failure err       -> Failure (Error ["Invalid username:"] <> err)
+  Success username2 -> Success username2
 
 reverseLine :: IO ()
 reverseLine = do
@@ -81,18 +96,34 @@ makeUserTmpPassword username =
 
 makeUser :: Username -> Password -> Validation Error User
 makeUser username password =
-  User <$> validateUsername username <*> validatePassword password
+  User <$> usernameErrors username <*> passwordErrors password
 
 promptWord :: T.Text -> IO T.Text
 promptWord wordName =
   T.putStr ("Please enter a " <> wordName <> "\n") *> T.getLine
 
+display :: Username -> Password -> IO ()
+display name password = case makeUser name password of
+  Failure err                      -> T.putStr $ T.unlines $ errorCoerce err
+  Success (User (Username name) _) -> T.putStrLn ("Welcome, " <> name)
+
+errorCoerce :: Error -> [T.Text]
+errorCoerce (Error err) = err
+
 main :: IO ()
 main =
-  makeUser
+  join
+    $   display
     <$> (Username <$> promptWord "username")
     <*> (Password <$> promptWord "password")
-    >>= print
+
+  -- do
+  -- username <- (Username <$> promptWord "username")
+  -- password <- (Password <$> promptWord "password")
+  -- display username password
+
+  -- (display <$> (Username <$> promptWord "username"))
+  --   <*> (Password <$> promptWord "password")
 
 printTestResult :: Either T.Text () -> IO ()
 printTestResult r = case r of
@@ -119,7 +150,7 @@ test = printTestResult $ do
     1
     (checkPasswordLength "")
     (Failure $ Error
-      "Your password cannot be longer than 19 or shorter than 11 characters"
+      ["Your password cannot be longer than 19 or shorter than 11 characters"]
     )
   eq 2
      (checkPasswordLength "julielovebooks")
