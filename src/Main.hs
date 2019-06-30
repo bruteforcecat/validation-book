@@ -1,58 +1,61 @@
+{-# LANGUAGE ApplicativeDo, GeneralisedNewtypeDeriving, OverloadedStrings #-}
+
 module Main where
 
 import           Data.Char
 import           Data.Validation
+import qualified Data.Text                     as T
+import qualified Data.Text.IO                  as T
 
-newtype Password = Password String deriving (Show, Eq)
+newtype Password = Password T.Text deriving (Show, Eq)
 
-newtype Error = Error String deriving (Show, Eq)
+newtype Error = Error T.Text deriving (Show, Eq)
 
-newtype Username = Username String deriving (Show, Eq)
+newtype Username = Username T.Text deriving (Show, Eq)
 
 instance Semigroup Error where
   Error xs <> Error ys = Error (xs <> ys)
 
-checkLength :: Int -> Int -> String -> Validation Error String
+checkLength :: Int -> Int -> T.Text -> Validation Error T.Text
 checkLength min max x = case (pwLen > max || pwLen < min) of
-  True ->
-    Failure
-      $  Error
-      $  "It is <longer than "
-      <> show max
-      <> " or shorter than "
-      <> show min
-      <> " characters"
+  True -> Failure $ Error $ T.unlines
+    [ "It is <longer than "
+    , T.pack $ show max
+    , " or shorter than "
+    , T.pack $ show min
+    , " characters"
+    ]
   False -> Success x
-  where pwLen = length x
+  where pwLen = T.length x
 
-checkPasswordLength :: String -> Validation Error Password
+checkPasswordLength :: T.Text -> Validation Error Password
 checkPasswordLength = fmap Password . checkLength 11 19
 
-checkUsernameLength :: String -> Validation Error Username
+checkUsernameLength :: T.Text -> Validation Error Username
 checkUsernameLength = fmap Username . checkLength 3 12
 
 
-requireAlphaNum :: String -> Validation Error String
-requireAlphaNum xs = case (all isAlphaNum xs) of
+requireAlphaNum :: T.Text -> Validation Error T.Text
+requireAlphaNum xs = case (all isAlphaNum $ T.unpack xs) of
   False -> Failure
     $ Error "Your password has to be consisted of numeric or alpha character"
   True -> Success xs
 
-cleanWhitespace :: String -> Validation Error String
-cleanWhitespace ""       = Failure $ Error "Empty String is not allowed"
-cleanWhitespace (x : xs) = case (isSpace x) of
-  True  -> cleanWhitespace xs
-  False -> Success (x : xs)
+cleanWhitespace :: T.Text -> Validation Error T.Text
+cleanWhitespace "" = Failure $ Error "Empty String is not allowed"
+cleanWhitespace x  = Success $ T.strip x
 
 validatePassword :: Password -> Validation Error Password
-validatePassword (Password password) =
-  case (cleanWhitespace password) of
-    Failure err -> Failure err
-    Success password2 -> requireAlphaNum password2 *> checkPasswordLength password2
+validatePassword (Password password) = case (cleanWhitespace password) of
+  Failure err -> Failure err
+  Success password2 ->
+    requireAlphaNum password2 *> checkPasswordLength password2
 
 validateUsername :: Username -> Validation Error Username
 validateUsername (Username username) =
-  cleanWhitespace username *> requireAlphaNum username *> checkUsernameLength username
+  cleanWhitespace username
+    *> requireAlphaNum username
+    *> checkUsernameLength username
 
 reverseLine :: IO ()
 reverseLine = do
@@ -63,7 +66,7 @@ bindMaybe :: Maybe a -> (a -> Maybe b) -> Maybe b
 bindMaybe (Just a) f = f a
 bindMaybe Nothing  _ = Nothing
 
-data StringOrValue a = Str String | Val a deriving Show
+data StringOrValue a = Str T.Text | Val a deriving Show
 
 bindStringOrValue
   :: StringOrValue a -> (a -> StringOrValue b) -> StringOrValue b
@@ -80,29 +83,33 @@ makeUser :: Username -> Password -> Validation Error User
 makeUser username password =
   User <$> validateUsername username <*> validatePassword password
 
-promptWord :: String -> IO String
+promptWord :: T.Text -> IO T.Text
 promptWord wordName =
-  putStr ("Please enter a"<> wordName <> "\n") *> getLine
+  T.putStr ("Please enter a " <> wordName <> "\n") *> T.getLine
 
 main :: IO ()
-main = do
-  username <- Username <$> promptWord "username"
-  password <- Password <$> promptWord "password"
-  print $ (makeUser username password)
+main =
+  makeUser
+    <$> (Username <$> promptWord "username")
+    <*> (Password <$> promptWord "password")
+    >>= print
 
-printTestResult :: Either String () -> IO ()
+printTestResult :: Either T.Text () -> IO ()
 printTestResult r = case r of
-  Left  err -> putStrLn err
-  Right ()  -> putStrLn "All tests passed"
+  Left  err -> T.putStrLn err
+  Right ()  -> T.putStrLn "All tests passed"
 
-eq :: (Eq a, Show a) => Int -> a -> a -> Either String ()
+eq :: (Eq a, Show a) => Int -> a -> a -> Either T.Text ()
 eq n actual expected = case (actual == expected) of
   True  -> Right ()
   False -> Left
-    (unlines
-      [ "Test " ++ show n
-      , " Expected:  " ++ show expected
-      , " But got:   " ++ show actual
+    (T.unlines
+      [ "Test "
+      , T.pack $ show n
+      , " Expected:  "
+      , T.pack $ show expected
+      , " But got:   "
+      , T.pack $ show actual
       ]
     )
 
