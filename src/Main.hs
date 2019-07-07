@@ -9,6 +9,8 @@ import qualified Data.Text.IO                  as T
 import           Control.Monad
 import           Data.List.NonEmpty
 import           Data.Coerce
+import           Control.Lens.Iso
+import           Control.Lens
 
 newtype Password = Password T.Text deriving (Show, Eq)
 
@@ -101,9 +103,12 @@ makeUserTmpPassword :: Username -> Validation Error User
 makeUserTmpPassword username =
   User <$> validateUsername username <*> (pure $ Password "temporaryPassword")
 
-makeUser :: Username -> Password -> Validation Error User
+makeUser :: Validate v => Username -> Password -> v Error User
 makeUser username password =
-  User <$> usernameErrors username <*> passwordErrors password
+  review _Validation
+    $   User
+    <$> usernameErrors username
+    <*> passwordErrors password
 
 promptWord :: T.Text -> IO T.Text
 promptWord wordName =
